@@ -202,6 +202,7 @@ a{color:#2dd4bf}
     }).then(function (doc) {
       return gh('auth.json', 'PUT', { message: 'Set up admin login', content: b64enc(JSON.stringify(doc) + '\n'), branch: BRANCH }).then(function (r) {
         if (r.status === 422) throw new Error('exists');
+        if (r.status === 401 || r.status === 403 || r.status === 404) throw new Error('nowrite');
         if (!r.ok) throw new Error('http ' + r.status);
       });
     }).then(function () {
@@ -210,7 +211,8 @@ a{color:#2dd4bf}
     }).catch(function (e) {
       token = '';
       say($('setupMsg'), e.message === 'auth' ? 'المفتاح غير صحيح أو لا يملك صلاحية Contents: Read and write على المستودع yanabea-data.' :
-        e.message === 'exists' ? 'الحساب موجود مسبقاً، أعد تحميل الصفحة.' : 'فشل: ' + e.message, 'bad');
+        e.message === 'exists' ? 'الحساب موجود مسبقاً، أعد تحميل الصفحة.' :
+        e.message === 'nowrite' ? 'المفتاح يقرأ فقط ولا يستطيع الكتابة. عدّل صلاحية Contents إلى Read and write (أو أنشئ مفتاحاً جديداً).' : 'فشل: ' + e.message, 'bad');
     });
   };
 
