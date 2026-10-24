@@ -12,10 +12,11 @@ body{background:#070b16;color:#eef2ff;font-family:"Segoe UI","Noto Sans Arabic",
 h1{font-size:26px;margin-bottom:4px}
 .sub{color:#93a0c4;font-size:14px;margin-bottom:20px}
 .card{background:#101830;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px;margin-bottom:16px}
-label{display:block;font-size:14px;color:#93a0c4;margin-bottom:6px}
+label{display:block;font-size:14px;color:#93a0c4;margin:10px 0 6px}
+label:first-child{margin-top:0}
 input[type=text],input[type=password]{width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#eef2ff;font:inherit;font-size:16px;outline:none}
 input:focus{border-color:#2dd4bf}
-.row{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
 button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:11px 18px;font-weight:700;font-size:15px}
 .pri{background:#2dd4bf;color:#04121a}
 .sec{background:rgba(255,255,255,.12);color:#eef2ff;font-weight:600}
@@ -41,14 +42,31 @@ a{color:#2dd4bf}
   <h1>إدارة فيديوهات كرزة</h1>
   <p class="sub">الصق رابط الفيديو وسيظهر في التلفاز خلال دقيقة تقريباً.</p>
 
-  <div class="card" id="loginCard">
-    <label for="key">مفتاح الدخول (كلمة السر)</label>
-    <input type="password" id="key" placeholder="github_pat_..." autocomplete="off"/>
-    <div class="row">
-      <button class="pri" id="login">دخول</button>
-    </div>
+  <div class="card" id="boot"><p class="note">جارٍ التحميل...</p></div>
+
+  <!-- تسجيل الدخول -->
+  <div class="card hide" id="loginCard">
+    <label for="lu">اسم المستخدم</label>
+    <input type="text" id="lu" autocomplete="username" autocapitalize="off"/>
+    <label for="lp">كلمة السر</label>
+    <input type="password" id="lp" autocomplete="current-password"/>
+    <div class="row"><button class="pri" id="login">دخول</button></div>
     <div class="msg" id="loginMsg"></div>
-    <p class="note" style="margin-top:10px">المفتاح محفوظ على هذا الجهاز فقط ولا يُرسل إلا إلى GitHub. من لا يملكه لا يستطيع التعديل.</p>
+  </div>
+
+  <!-- إعداد أول مرة -->
+  <div class="card hide" id="setupCard">
+    <p class="note" style="margin-bottom:10px">إعداد أول مرة: أنشئ اسم مستخدم وكلمة سر. تحتاج مفتاح GitHub مرة واحدة فقط (الخطوات في رسالة Claude)، ثم لا تحتاجه بعد ذلك.</p>
+    <label for="st">مفتاح GitHub (يبدأ بـ github_pat_)</label>
+    <input type="password" id="st" autocomplete="off"/>
+    <label for="su">اسم المستخدم الذي تريده</label>
+    <input type="text" id="su" autocomplete="off" autocapitalize="off"/>
+    <label for="sp">كلمة السر (8 أحرف على الأقل، والأفضل أطول)</label>
+    <input type="password" id="sp" autocomplete="new-password"/>
+    <label for="sp2">أعد كتابة كلمة السر</label>
+    <input type="password" id="sp2" autocomplete="new-password"/>
+    <div class="row"><button class="pri" id="setup">حفظ وإنشاء الحساب</button></div>
+    <div class="msg" id="setupMsg"></div>
   </div>
 
   <div id="panel" class="hide">
@@ -56,7 +74,7 @@ a{color:#2dd4bf}
       <label for="url">رابط الفيديو (يوتيوب)</label>
       <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=..." dir="ltr" autocomplete="off"/>
       <div class="prev hide" id="prev"><img id="pimg" alt=""/><div><b id="ptitle"></b></div></div>
-      <div id="titleRow" class="hide" style="margin-top:10px">
+      <div id="titleRow" class="hide">
         <label for="title">العنوان (يمكنك تعديله)</label>
         <input type="text" id="title"/>
       </div>
@@ -76,90 +94,154 @@ a{color:#2dd4bf}
 
 <script>
 (function () {
-  var OWNER = 'FerasAlmansour', REPO = 'yanabea-tv', FILE = 'kirza.json', BRANCH = 'main';
-  var API = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/' + FILE;
+  var OWNER = 'FerasAlmansour', REPO = 'yanabea-data', BRANCH = 'main';
+  var ROOT = 'https://api.github.com/repos/' + OWNER + '/' + REPO + '/contents/';
+  var ITER = 600000;
   function $(id) { return document.getElementById(id); }
-  var token = '', sha = null, data = { items: [] }, pending = null;
-
+  function show(id) { ['boot', 'loginCard', 'setupCard', 'panel'].forEach(function (x) { $(x).classList.toggle('hide', x !== id); }); }
   function say(el, text, cls) { el.textContent = text; el.className = 'msg ' + (cls || ''); }
+
+  /* ---- base64 / crypto helpers ---- */
   function b64enc(s) { return btoa(unescape(encodeURIComponent(s))); }
   function b64dec(s) { return decodeURIComponent(escape(atob(s.replace(/\n/g, '')))); }
-  function gh(method, body) {
-    return fetch(API + (method === 'GET' ? '?ref=' + BRANCH + '&t=' + Date.now() : ''), {
+  function bytesToB64(u8) { var s = ''; for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); }
+  function b64ToBytes(b) { var s = atob(b), u = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  function te(s) { return new TextEncoder().encode(s); }
+  function deriveKey(user, pass, salt) {
+    return crypto.subtle.importKey('raw', te(user.trim().toLowerCase() + '\u0000' + pass), 'PBKDF2', false, ['deriveKey'])
+      .then(function (km) {
+        return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: salt, iterations: ITER, hash: 'SHA-256' }, km, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      });
+  }
+  function seal(token, user, pass) {
+    var salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+    return deriveKey(user, pass, salt).then(function (k) { return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, k, te(token)); })
+      .then(function (ct) { return { v: 1, iter: ITER, salt: bytesToB64(salt), iv: bytesToB64(iv), data: bytesToB64(new Uint8Array(ct)) }; });
+  }
+  function unseal(auth, user, pass) {
+    return deriveKey(user, pass, b64ToBytes(auth.salt)).then(function (k) {
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64ToBytes(auth.iv) }, k, b64ToBytes(auth.data));
+    }).then(function (pt) { return new TextDecoder().decode(pt); });
+  }
+
+  /* ---- GitHub contents API ---- */
+  var token = '', shaKirza = null, data = { items: [] }, pending = null, authDoc = null;
+  function gh(file, method, body) {
+    return fetch(ROOT + file + (method === 'GET' ? '?ref=' + BRANCH + '&t=' + Date.now() : ''), {
       method: method,
       headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined
     });
   }
-
-  function load() {
-    return gh('GET').then(function (r) {
-      if (r.status === 404) { sha = null; data = { items: [] }; return; }
+  function loadData() {
+    return gh('kirza.json', 'GET').then(function (r) {
+      if (r.status === 404) { shaKirza = null; data = { items: [] }; return; }
       if (r.status === 401 || r.status === 403) throw new Error('auth');
       if (!r.ok) throw new Error('http ' + r.status);
-      return r.json().then(function (j) { sha = j.sha; data = JSON.parse(b64dec(j.content)); if (!data.items) data.items = []; });
+      return r.json().then(function (j) { shaKirza = j.sha; data = JSON.parse(b64dec(j.content)); if (!data.items) data.items = []; });
     });
   }
-  function save(note) {
+  function saveData(note) {
     var body = { message: note, content: b64enc(JSON.stringify(data, null, 1) + '\n'), branch: BRANCH };
-    if (sha) body.sha = sha;
-    return gh('PUT', body).then(function (r) {
+    if (shaKirza) body.sha = shaKirza;
+    return gh('kirza.json', 'PUT', body).then(function (r) {
       if (r.status === 409 || r.status === 422) throw new Error('conflict');
       if (r.status === 401 || r.status === 403) throw new Error('auth');
       if (!r.ok) throw new Error('http ' + r.status);
-      return r.json().then(function (j) { sha = j.content.sha; });
+      return r.json().then(function (j) { shaKirza = j.content.sha; });
     });
   }
 
+  /* ---- start: is an account already set up? ---- */
+  function start() {
+    fetch('auth.json?t=' + Date.now()).then(function (r) {
+      if (r.status === 404) { show('setupCard'); return; }
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json().then(function (a) {
+        authDoc = a;
+        var saved = ''; try { saved = localStorage.getItem('kirza.key') || ''; } catch (e) {}
+        if (saved) { token = saved; return loadData().then(function () { show('panel'); render(); }).catch(function () { token = ''; try { localStorage.removeItem('kirza.key'); } catch (e) {} show('loginCard'); }); }
+        show('loginCard');
+      });
+    }).catch(function (e) { $('boot').innerHTML = '<p class="note bad">تعذر التحميل: ' + e.message + '</p>'; });
+  }
+
+  /* ---- login ---- */
+  var lastTry = 0;
+  function doLogin() {
+    var u = $('lu').value, p = $('lp').value;
+    if (!u || !p) { say($('loginMsg'), 'اكتب اسم المستخدم وكلمة السر.', 'bad'); return; }
+    if (Date.now() - lastTry < 1500) return; lastTry = Date.now();
+    say($('loginMsg'), 'جارٍ التحقق...', '');
+    unseal(authDoc, u, p).then(function (t) {
+      token = t;
+      return loadData().then(function () {
+        try { localStorage.setItem('kirza.key', token); } catch (e) {}
+        $('lp').value = ''; show('panel'); render();
+      });
+    }, function () { throw new Error('bad'); }).catch(function (e) {
+      token = '';
+      say($('loginMsg'), e.message === 'bad' ? 'اسم المستخدم أو كلمة السر غير صحيحة.' : 'تعذر الاتصال: ' + e.message, 'bad');
+    });
+  }
+  $('login').onclick = doLogin;
+  $('lp').onkeydown = function (e) { if (e.keyCode === 13) doLogin(); };
+  $('logout').onclick = function () { try { localStorage.removeItem('kirza.key'); } catch (e) {} location.reload(); };
+
+  /* ---- first-time setup ---- */
+  $('setup').onclick = function () {
+    var t = $('st').value.trim(), u = $('su').value.trim(), p = $('sp').value;
+    if (!t || !u || !p) { say($('setupMsg'), 'املأ كل الحقول.', 'bad'); return; }
+    if (p.length < 8) { say($('setupMsg'), 'كلمة السر قصيرة (8 أحرف على الأقل).', 'bad'); return; }
+    if (p !== $('sp2').value) { say($('setupMsg'), 'كلمتا السر غير متطابقتين.', 'bad'); return; }
+    say($('setupMsg'), 'جارٍ التحقق من المفتاح...', '');
+    token = t;
+    loadData().then(function () {
+      say($('setupMsg'), 'جارٍ التشفير والحفظ...', '');
+      return seal(t, u, p);
+    }).then(function (doc) {
+      return gh('auth.json', 'PUT', { message: 'Set up admin login', content: b64enc(JSON.stringify(doc) + '\n'), branch: BRANCH }).then(function (r) {
+        if (r.status === 422) throw new Error('exists');
+        if (!r.ok) throw new Error('http ' + r.status);
+      });
+    }).then(function () {
+      try { localStorage.setItem('kirza.key', token); } catch (e) {}
+      show('panel'); render();
+    }).catch(function (e) {
+      token = '';
+      say($('setupMsg'), e.message === 'auth' ? 'المفتاح غير صحيح أو لا يملك صلاحية Contents: Read and write على المستودع yanabea-data.' :
+        e.message === 'exists' ? 'الحساب موجود مسبقاً، أعد تحميل الصفحة.' : 'فشل: ' + e.message, 'bad');
+    });
+  };
+
+  /* ---- videos ---- */
   function videoId(u) {
     u = (u || '').trim();
     var m = u.match(/(?:youtu\.be\/|[?&]v=|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/);
     if (m) return m[1];
     return /^[A-Za-z0-9_-]{11}$/.test(u) ? u : null;
   }
-
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function render() {
     $('cnt').textContent = data.items.length;
     var h = '';
     data.items.forEach(function (v, i) {
-      h += '<div class="item"><img src="https://i.ytimg.com/vi/' + v.id + '/mqdefault.jpg" alt=""/>' +
-        '<div class="t">' + esc(v.title) + '<small>' + v.id + '</small></div>' +
+      h += '<div class="item"><img src="https://i.ytimg.com/vi/' + esc(v.id) + '/mqdefault.jpg" alt=""/>' +
+        '<div class="t">' + esc(v.title) + '<small>' + esc(v.id) + '</small></div>' +
         '<button class="sec" data-up="' + i + '"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
         '<button class="sec" data-dn="' + i + '"' + (i === data.items.length - 1 ? ' disabled' : '') + '>▼</button>' +
         '<button class="dan" data-del="' + i + '">حذف</button></div>';
     });
     $('list').innerHTML = h || '<p class="note">لا توجد فيديوهات بعد.</p>';
   }
-  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
-  function enter() {
-    $('loginCard').classList.add('hide'); $('panel').classList.remove('hide'); render();
-  }
-  function login(t, silent) {
-    token = t.trim();
-    if (!token) return;
-    say($('loginMsg'), 'جارٍ التحقق...', '');
-    load().then(function () {
-      try { localStorage.setItem('kirza.key', token); } catch (e) {}
-      enter();
-    }).catch(function (e) {
-      token = '';
-      try { localStorage.removeItem('kirza.key'); } catch (x) {}
-      if (!silent) say($('loginMsg'), e.message === 'auth' ? 'المفتاح غير صحيح أو لا يملك صلاحية التعديل.' : 'تعذر الاتصال: ' + e.message, 'bad');
-    });
-  }
-  $('login').onclick = function () { login($('key').value); };
-  $('key').onkeydown = function (e) { if (e.keyCode === 13) login($('key').value); };
-  $('logout').onclick = function () { try { localStorage.removeItem('kirza.key'); } catch (e) {} location.reload(); };
-
-  // link -> preview
   var t0;
   $('url').oninput = function () {
     clearTimeout(t0); pending = null; $('add').disabled = true; $('prev').classList.add('hide'); $('titleRow').classList.add('hide'); say($('msg'), '', '');
     var v = this.value;
     t0 = setTimeout(function () {
-      var id = videoId(v);
       if (!v.trim()) return;
+      var id = videoId(v);
       if (!id) { say($('msg'), 'الرابط غير صالح.', 'bad'); return; }
       if (data.items.some(function (x) { return x.id === id; })) { say($('msg'), 'هذا الفيديو مضاف مسبقاً.', 'bad'); return; }
       say($('msg'), 'جارٍ جلب العنوان...', '');
@@ -178,18 +260,15 @@ a{color:#2dd4bf}
     $('add').disabled = false;
     if (title) say($('msg'), '', '');
   }
-
   function commit(note, okText) {
     $('add').disabled = true;
     say($('msg'), 'جارٍ الحفظ...', '');
-    return save(note).then(function () { say($('msg'), okText + ' سيظهر في التلفاز خلال دقيقة تقريباً.', 'ok'); render(); })
+    return saveData(note).then(function () { say($('msg'), okText + ' سيظهر في التلفاز خلال دقيقة تقريباً.', 'ok'); render(); })
       .catch(function (e) {
-        // reload latest copy so nothing is overwritten silently
-        say($('msg'), e.message === 'conflict' ? 'تغيّرت القائمة أثناء الحفظ، أعد المحاولة.' : (e.message === 'auth' ? 'المفتاح لا يملك صلاحية التعديل.' : 'فشل الحفظ: ' + e.message), 'bad');
-        return load().then(render);
+        say($('msg'), e.message === 'conflict' ? 'تغيّرت القائمة أثناء الحفظ، أعد المحاولة.' : (e.message === 'auth' ? 'انتهت صلاحية المفتاح، اضغط خروج وأعد الدخول.' : 'فشل الحفظ: ' + e.message), 'bad');
+        return loadData().then(render);
       });
   }
-
   $('add').onclick = function () {
     if (!pending) return;
     var title = $('title').value.trim() || pending;
@@ -212,8 +291,7 @@ a{color:#2dd4bf}
     }
   };
 
-  var saved = ''; try { saved = localStorage.getItem('kirza.key') || ''; } catch (e) {}
-  if (saved) login(saved, true);
+  start();
 })();
 </script>
 </body>
